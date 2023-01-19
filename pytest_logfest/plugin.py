@@ -193,3 +193,47 @@ def _create_directory_if_it_not_exists(path):
             pass
         else:
             raise
+
+
+@pytest.mark.tryfirst
+def pytest_configure(config):
+    # Add the microseconds format option to the logfile_format
+    config.getini("logfile_format").append("%(asctime)s.%(msecs)03d")
+    config.addinivalue_line("markers", "logfile(filename): mark test to write log entries to file.")
+
+def pytest_addoption(parser):
+    group = parser.getgroup("logfile plugin options")
+    group.addoption(
+        "--logfile",
+        action="store",
+        dest="logfile",
+        default=None,
+        help="write log entries to file",
+    )
+
+@pytest.fixture
+def logfile(request):
+    filename = request.config.getoption("logfile")
+    if filename:
+        logfile = open(filename, "w")
+        logfile.write("Timestamp, Log Level, Logger, Message\n")
+        yield logfile
+        logfile.close()
+    else:
+        yield None
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    if report.when == "call" and report.failed:
+        logfile = item.funcargs["logfile"]
+        if logfile:
+            for record in item.funcargs["caplog"].records:
+                # Add the microseconds to the timestamp
+                record.asctime = datetime.datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S.%f")
+                logfile.write(
+                    f"{record.asctime}, {record.levelname}, {record.name}, {record.getMessage()}\n"
+                )
+
+
